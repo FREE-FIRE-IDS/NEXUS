@@ -367,6 +367,9 @@ export default function App() {
       mediaUrl,
       replyToMessage: additional?.replyTo || undefined,
       poll: additional?.poll || undefined,
+      fileName: additional?.fileName || undefined,
+      fileSize: additional?.fileSize || undefined,
+      duration: additional?.duration || undefined,
       seen: false,
       delivered: true,
       timestamp: new Date().toISOString()
@@ -515,6 +518,51 @@ export default function App() {
   };
 
   const handleHangupCall = (durationSecs: number) => {
+    if (!activeCall) return;
+    const durStr = durationSecs > 0 ? ` (${Math.floor(durationSecs / 60)}m ${durationSecs % 60}s)` : " (No answer)";
+    const callTypeStr = activeCall.type === 'video' ? "Video Call" : "Voice Call";
+    const recordText = durationSecs > 0 
+      ? `📞 Call completed: ${callTypeStr}${durStr}` 
+      : `⚠️ Call missed: ${callTypeStr}`;
+
+    // Log call event as an actual interactive message inside the message flow
+    const targetChat = chats.find(c => c.participantId === activeCall.userId);
+    if (targetChat) {
+      const newCallMsg: Message = {
+        id: `m-call-${Date.now()}`,
+        chatId: targetChat.id,
+        senderId: activeCall.direction === 'outgoing' ? currentUser!.id : activeCall.userId,
+        senderName: activeCall.direction === 'outgoing' ? currentUser!.name : activeCall.userName,
+        type: 'text',
+        content: recordText,
+        seen: true,
+        delivered: true,
+        timestamp: new Date().toISOString()
+      };
+      
+      const nextMsgs = [...messages, newCallMsg];
+      setMessages(nextMsgs);
+
+      // Link last message indicator
+      const nextChats = chats.map(c => {
+        if (c.id === targetChat.id) {
+          return {
+            ...c,
+            lastMessage: {
+              content: recordText,
+              type: 'text',
+              timestamp: new Date().toISOString(),
+              senderId: activeCall.direction === 'outgoing' ? currentUser!.id : activeCall.userId,
+              seen: true
+            }
+          };
+        }
+        return c;
+      });
+      setChats(nextChats);
+      saveCacheInstantly(currentUser!.id, nextChats, nextMsgs, calls, statuses);
+    }
+
     setActiveCall(null);
     triggerToast("NEXUS TELECOMMUNICATION", `Call session disconnected. Duration: ${durationSecs}s`, "📞");
     
@@ -531,6 +579,16 @@ export default function App() {
         return copy;
       });
     }
+  };
+
+  const handleUpdateContact = (chatId: string, updatedFields: Partial<Chat>) => {
+    if (!currentUser) return;
+    setChats(prev => {
+      const updated = prev.map(c => c.id === chatId ? { ...c, ...updatedFields } : c);
+      saveCacheInstantly(currentUser.id, updated, messages, calls, statuses);
+      return updated;
+    });
+    triggerToast("CONTACT RE-ORGANIZED", "Contact properties synchronized successfully.", "📝");
   };
 
   // ADDING CONTACTS BY VIRTUAL NEXUS ID (+0......)
@@ -1422,6 +1480,7 @@ export default function App() {
                   const ch = chats.find(c => c.id === cid);
                   if (ch) setContactToDelete(ch);
                 }}
+                onUpdateContact={handleUpdateContact}
               />
             ) : (
               // Empty visual workspace landing card bento

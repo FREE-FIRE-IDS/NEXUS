@@ -60,6 +60,7 @@ interface ChatPanelProps {
   onArchiveChat: () => void;
   onPlaceCall: (type: 'voice' | 'video') => void;
   onDeleteContact?: (chatId: string) => void;
+  onUpdateContact?: (chatId: string, updatedFields: Partial<Chat>) => void;
 }
 
 // Preset assets for media simulations
@@ -90,6 +91,7 @@ export function ChatPanel({
   onArchiveChat,
   onPlaceCall,
   onDeleteContact,
+  onUpdateContact,
 }: ChatPanelProps) {
   const [inputText, setInputText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -101,6 +103,28 @@ export function ChatPanel({
   const [showStickers, setShowStickers] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showGifs, setShowGifs] = useState(false);
+
+  // Edit contact detail states
+  const [showEditContactModal, setShowEditContactModal] = useState(false);
+  const [editContactName, setEditContactName] = useState(chat.name);
+  const [editContactBio, setEditContactBio] = useState(chat.bio);
+  const [editContactAvatar, setEditContactAvatar] = useState(chat.avatar);
+
+  // Keep contact fields synced when chat resets
+  useEffect(() => {
+    setEditContactName(chat.name);
+    setEditContactBio(chat.bio);
+    setEditContactAvatar(chat.avatar);
+  }, [chat.id, chat.name, chat.bio, chat.avatar]);
+
+  // Audio playing states
+  const [activeAudioId, setActiveAudioId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const [audioPlaybackProgress, setAudioPlaybackProgress] = useState<{ [msgId: string]: number }>({});
+
+  // MediaRecorder refs for real audio capture
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Poll Creator states
   const [showPollCreator, setShowPollCreator] = useState(false);
@@ -195,24 +219,162 @@ export function ChatPanel({
     setShowPollCreator(false);
   };
 
+  const handleRealImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        onSendMessage("Attached HD Image 📷: " + file.name, 'image', reader.result as string, { fileName: file.name });
+      };
+      reader.readAsDataURL(file);
+      setShowAttachMenu(false);
+    }
+  };
+
+  const handleRealVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        onSendMessage("Attached Video Clip 🎥: " + file.name, 'video', reader.result as string, { fileName: file.name });
+      };
+      reader.readAsDataURL(file);
+      setShowAttachMenu(false);
+    }
+  };
+
+  const handleRealDocumentUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+        onSendMessage(file.name, 'document', reader.result as string, {
+          fileName: file.name,
+          fileSize: `${sizeMb} MB`
+        });
+      };
+      reader.readAsDataURL(file);
+      setShowAttachMenu(false);
+    }
+  };
+
+  const handleRealLocationShare = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          const locString = `📍 Live Location Pin: Latitude ${latitude.toFixed(4)}°, Longitude ${longitude.toFixed(4)}°`;
+          const mapUrl = `https://maps.google.com/?q=${latitude},${longitude}`;
+          onSendMessage(locString, 'location', mapUrl);
+          setShowAttachMenu(false);
+        },
+        (error) => {
+          console.warn("Location prompt fails:", error);
+          const mapUrl = "https://maps.google.com/?q=21.1458,79.0882";
+          onSendMessage("📍 Coordinates: Nagpur Central, India (21.1458° N, 79.0882° E)", 'location', mapUrl);
+          setShowAttachMenu(false);
+        }
+      );
+    } else {
+      const mapUrl = "https://maps.google.com/?q=21.1458,79.0882";
+      onSendMessage("📍 Location details unavailable", 'location', mapUrl);
+      setShowAttachMenu(false);
+    }
+  };
+
   const handleMockAttachmentSubmit = (type: Message['type'], label: string, url: string) => {
     onSendMessage(label, type, url);
     setShowAttachMenu(false);
   };
 
-  const startVoiceRecording = () => {
-    setIsRecordingVoice(true);
+  const handleTogglePlayAudio = (msgId: string, url: string) => {
+    if (activeAudioId === msgId) {
+      if (audioPlayerRef.current) {
+        if (audioPlayerRef.current.paused) {
+          audioPlayerRef.current.play();
+        } else {
+          audioPlayerRef.current.pause();
+        }
+      }
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      setActiveAudioId(msgId);
+      const audio = new Audio(url);
+      audioPlayerRef.current = audio;
+      audio.play().catch(err => console.warn("Audio playback aborted:", err));
+
+      audio.ontimeupdate = () => {
+        const prog = (audio.currentTime / audio.duration) * 100 || 0;
+        setAudioPlaybackProgress(prev => ({ ...prev, [msgId]: prog }));
+      };
+
+      audio.onended = () => {
+        setActiveAudioId(null);
+        setAudioPlaybackProgress(prev => ({ ...prev, [msgId]: 0 }));
+      };
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          if (audioChunksRef.current.length > 0) {
+            const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' });
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64Audio = reader.result as string;
+              onSendMessage("Voice message note 🎤", 'audio', base64Audio, { duration: voiceSecs || 5 });
+            };
+            reader.readAsDataURL(audioBlob);
+          } else {
+            // Simulated backup audio element fallback if browser iframe stops capture
+            onSendMessage("Voice message note 🎤", 'audio', "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", { duration: voiceSecs || 4 });
+          }
+          stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        setIsRecordingVoice(true);
+      } else {
+        // pure visual fallback
+        setIsRecordingVoice(true);
+      }
+    } catch (err) {
+      console.warn("MediaRecorder mic access refused:", err);
+      setIsRecordingVoice(true); // fallback mode
+    }
   };
 
   const cancelVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecordingVoice(false);
   };
 
   const finishVoiceRecording = () => {
-    if (!isRecordingVoice) return;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    } else if (isRecordingVoice) {
+      // simulated fallback output
+      onSendMessage("Voice message note 🎤", 'audio', "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", { duration: voiceSecs || 4 });
+    }
     setIsRecordingVoice(false);
-    // Send a beautiful simulated high quality voice message
-    onSendMessage("Voice Recording", 'audio', "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", { duration: voiceSecs || 4 });
   };
 
   const handleCopyText = (text: string) => {
@@ -320,6 +482,14 @@ export function ChatPanel({
               </button>
 
               <button 
+                onClick={() => { setShowEditContactModal(true); setShowMenu(false); }}
+                className="w-full text-left p-2.5 hover:bg-slate-800 rounded-xl text-slate-300 flex items-center gap-2"
+              >
+                <SmilePlus className="w-4 h-4 text-pink-400" />
+                <span>Edit Contact Details</span>
+              </button>
+
+              <button 
                 onClick={() => { onArchiveChat(); setShowMenu(false); }}
                 className="w-full text-left p-2.5 hover:bg-slate-800 rounded-xl text-slate-300 flex items-center gap-2"
               >
@@ -396,15 +566,19 @@ export function ChatPanel({
               >
                 <div 
                   className={`max-w-[75%] shadow-md flex flex-col relative ${
-                    isMe 
-                      ? "chat-bubble-me text-white" 
-                      : "chat-bubble-them text-zinc-200 border border-white/5 shadow-md"
+                    msg.type === 'sticker' 
+                      ? "bg-transparent shadow-none" 
+                      : `p-3.5 pt-3.5 pb-2 px-4 rounded-2xl ${
+                          isMe 
+                            ? "chat-bubble-me text-white" 
+                            : "chat-bubble-them text-zinc-100 border border-white/5 shadow-md"
+                        }`
                   }`}
                 >
                   
                   {/* Reply Reference header inside message card */}
                   {msg.replyToMessage && (
-                    <div className="p-2 rounded-lg bg-black/25 text-[10px] leading-tight mb-2 border-l-2 border-[#2D5CFE] flex flex-col text-slate-300">
+                    <div className="p-2.5 rounded-xl bg-black/25 text-[10px] leading-tight mb-2.5 border-l-2 border-[#2D5CFE] flex flex-col text-slate-300 text-left">
                       <span className="font-bold text-[#2D5CFE]">{msg.replyToMessage.senderName}</span>
                       <span className="truncate">{msg.replyToMessage.content}</span>
                     </div>
@@ -424,15 +598,27 @@ export function ChatPanel({
                   )}
 
                   {msg.type === 'audio' && (
-                    <div className="mb-2 flex items-center gap-3 bg-black/25 p-2.5 rounded-xl border border-white/5">
-                      <div className="w-9 h-9 rounded-full bg-[#2D5CFE]/10 flex items-center justify-center text-[#2D5CFE] text-xs">
-                        {msg.duration ? `${msg.duration}s` : "Play"}
-                      </div>
-                      <div className="flex-1 space-y-1">
-                        <div className="h-1 w-28 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-[#2D5CFE]" style={{ width: "45%" }} />
+                    <div className="mb-2 flex items-center gap-3 bg-zinc-950/45 p-3 rounded-2xl border border-white/5 w-56 sm:w-64">
+                      <button
+                        type="button"
+                        onClick={() => msg.mediaUrl && handleTogglePlayAudio(msg.id, msg.mediaUrl)}
+                        className="w-10 h-10 rounded-full bg-[#2D5CFE]/20 hover:bg-[#2D5CFE]/30 flex items-center justify-center text-[#2D5CFE] text-sm transition focus:outline-none"
+                        title={activeAudioId === msg.id && audioPlayerRef.current && !audioPlayerRef.current.paused ? "Pause memo" : "Play memo"}
+                      >
+                        {activeAudioId === msg.id && audioPlayerRef.current && !audioPlayerRef.current.paused ? "⏸️" : "▶️"}
+                      </button>
+                      
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-1.5 w-full bg-zinc-850 rounded-full overflow-hidden relative">
+                          <div 
+                            className="h-full bg-[#2D5CFE] transition-all duration-100 shadow-[0_0_4px_#2D5CFE]" 
+                            style={{ width: `${audioPlaybackProgress[msg.id] || 0}%` }} 
+                          />
                         </div>
-                        <p className="text-[9px] text-slate-400 font-mono tracking-widest uppercase">VOICENOTE SENSING</p>
+                        <div className="flex justify-between items-center text-[8px] text-zinc-400 font-mono uppercase tracking-wider">
+                          <span>AUDIO NOTE RE</span>
+                          <span>{msg.duration ? `${msg.duration}s` : "VOICE"}</span>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -440,19 +626,37 @@ export function ChatPanel({
                   {msg.type === 'document' && (
                     <a 
                       href={msg.mediaUrl} 
-                      download={msg.fileName}
-                      className="mb-2 flex items-center gap-3 bg-black/25 p-2 rounded-xl border border-white/5 hover:bg-white/5 transition"
+                      download={msg.fileName || "nexus_doc.pdf"}
+                      className="mb-2 flex items-center gap-3 bg-black/25 p-2 rounded-xl border border-white/5 hover:bg-white/5 transition text-left"
                     >
                       <FileBox className="w-8 h-8 text-[#2D5CFE]" />
-                      <div className="text-left">
+                      <div>
                         <p className="text-xs font-bold text-white max-w-[120px] truncate">{msg.fileName || "nexus_doc.pdf"}</p>
                         <p className="text-[9px] text-slate-500 font-mono">{msg.fileSize || "4.8 MB"}</p>
                       </div>
                     </a>
                   )}
 
+                  {msg.type === 'location' && (
+                    <div className="mb-2 p-3 bg-black/35 rounded-2xl border border-white/5 text-left w-56 sm:w-64 space-y-2">
+                      <div className="flex items-center gap-2 text-rose-455 font-semibold text-xs">
+                        <MapPin className="w-5 h-5 text-rose-500 animate-pulse" />
+                        <span>Pinned Location Node</span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 font-mono leading-tight truncate">{msg.content}</p>
+                      <a 
+                        href={msg.mediaUrl || "https://maps.google.com"} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="block w-full py-2 bg-rose-600 hover:bg-rose-500 text-white text-center rounded-xl text-[10px] font-bold uppercase tracking-wider transition"
+                      >
+                        Open Live Maps 🗺️
+                      </a>
+                    </div>
+                  )}
+
                   {msg.type === 'poll' && msg.poll && (
-                    <div className="p-3 bg-black/20 rounded-xl border border-white/5 mb-2 space-y-2.5 text-left w-56 sm:w-64">
+                    <div className="p-3 bg-black/20 rounded-xl border border-white/5 mb-2 space-y-2.5 text-left w-56 sm:w-64 animate-fade-in">
                       <p className="text-xs font-bold text-[#2D5CFE] flex items-center gap-1.5">
                         <BarChart2 className="w-4 h-4" />
                         <span>{msg.poll.question}</span>
@@ -499,8 +703,8 @@ export function ChatPanel({
                   )}
 
                   {/* Standard Text description */}
-                  {msg.type !== 'poll' && msg.type !== 'sticker' && msg.type !== 'gif' && (
-                    <p className="text-xs leading-normal select-text break-words font-sans">
+                  {msg.type !== 'poll' && msg.type !== 'sticker' && msg.type !== 'gif' && msg.type !== 'location' && msg.type !== 'audio' && msg.type !== 'document' && (
+                    <p className="text-xs leading-normal select-text break-words font-sans text-left">
                       {msg.content}
                     </p>
                   )}
@@ -580,12 +784,35 @@ export function ChatPanel({
 
       {/* DRAWERS & DIALOG OVERLAYS IN ACTION BOX */}
 
+      {/* Hidden Files inputs for real uploads */}
+      <input 
+        type="file" 
+        id="real-attach-image" 
+        accept="image/*" 
+        className="hidden" 
+        onChange={handleRealImageUpload} 
+      />
+      <input 
+        type="file" 
+        id="real-attach-video" 
+        accept="video/*" 
+        className="hidden" 
+        onChange={handleRealVideoUpload} 
+      />
+      <input 
+        type="file" 
+        id="real-attach-document" 
+        accept=".pdf, .doc, .docx, .xls, .xlsx, .txt, .json, .zip, .rar" 
+        className="hidden" 
+        onChange={handleRealDocumentUpload} 
+      />
+
       {/* Attachment Submenu Drawer */}
       {showAttachMenu && (
-        <div className="absolute bottom-20 left-4 bg-zinc-950/95 border border-white/5 rounded-2xl grid grid-cols-3 gap-2.5 p-3.5 z-20 shadow-2xl">
+        <div className="absolute bottom-20 left-4 bg-zinc-950/95 border border-white/5 rounded-2xl grid grid-cols-3 gap-2.5 p-3.5 z-20 shadow-2xl animate-fade-in">
           <button
             type="button"
-            onClick={() => handleMockAttachmentSubmit('image', "Attached HD Photo", "https://images.unsplash.com/photo-1579202673506-ca3ce28943ef?w=600&auto=format&fit=crop")}
+            onClick={() => document.getElementById('real-attach-image')?.click()}
             className="flex flex-col items-center p-2.5 hover:bg-white/5 rounded-xl text-[#2D5CFE] text-center text-[10px] font-medium transition"
           >
             <ImageIcon className="w-5 h-5 mb-1 text-[#2D5CFE]" />
@@ -594,7 +821,7 @@ export function ChatPanel({
 
           <button
             type="button"
-            onClick={() => handleMockAttachmentSubmit('video', "Attached Film Log", "https://www.w3schools.com/html/mov_bbb.mp4")}
+            onClick={() => document.getElementById('real-attach-video')?.click()}
             className="flex flex-col items-center p-2.5 hover:bg-white/5 rounded-xl text-purple-400 text-center text-[10px] font-medium transition"
           >
             <Video className="w-5 h-5 mb-1 text-purple-400" />
@@ -603,7 +830,7 @@ export function ChatPanel({
 
           <button
             type="button"
-            onClick={() => handleMockAttachmentSubmit('document', "system_requirements.pdf", "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf")}
+            onClick={() => document.getElementById('real-attach-document')?.click()}
             className="flex flex-col items-center p-2.5 hover:bg-white/5 rounded-xl text-emerald-400 text-center text-[10px] font-medium transition"
           >
             <FileText className="w-5 h-5 mb-1 text-emerald-400" />
@@ -621,7 +848,7 @@ export function ChatPanel({
 
           <button
             type="button"
-            onClick={() => handleMockAttachmentSubmit('location', "Sat-Map Coordinates: 37.7749N, 122.4194W", "https://maps.google.com")}
+            onClick={handleRealLocationShare}
             className="flex flex-col items-center p-2.5 hover:bg-white/5 rounded-xl text-rose-400 text-center text-[10px] font-medium transition"
           >
             <MapPin className="w-5 h-5 mb-1 text-rose-400" />
@@ -633,7 +860,7 @@ export function ChatPanel({
             onClick={() => { setShowGifs(!showGifs); setShowAttachMenu(false); }}
             className="flex flex-col items-center p-2.5 hover:bg-white/5 rounded-xl text-indigo-400 text-center text-[10px] font-medium transition"
           >
-            <Sparkles className="w-5 h-5 mb-1" />
+            <Sparkles className="w-5 h-5 mb-1 text-indigo-400" />
             <span>GIF Vault</span>
           </button>
         </div>
@@ -686,6 +913,85 @@ export function ChatPanel({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Edit Contact Details Modal */}
+      {showEditContactModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="w-full max-w-sm bg-zinc-950 border border-white/5 rounded-3xl p-6 shadow-2xl text-left space-y-4 font-sans">
+            <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <h4 className="text-sm font-bold text-white uppercase tracking-wider">Edit Contact Details</h4>
+              <button 
+                onClick={() => setShowEditContactModal(false)}
+                className="p-1.5 hover:bg-white/5 rounded-xl text-slate-400 hover:text-white transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] text-slate-400 font-semibold mb-1 block">Contact Name</label>
+                <input
+                  type="text"
+                  value={editContactName}
+                  onChange={(e) => setEditContactName(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#050505] border border-white/5 rounded-xl text-xs text-white focus:outline-none focus:border-[#2D5CFE] transition"
+                  placeholder="Enter custom user name"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-400 font-semibold mb-1 block">Custom Bio / Node details</label>
+                <input
+                  type="text"
+                  value={editContactBio}
+                  onChange={(e) => setEditContactBio(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#050505] border border-white/5 rounded-xl text-xs text-white focus:outline-none focus:border-[#2D5CFE] transition"
+                  placeholder="Interactive digital user node active."
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-slate-400 font-semibold mb-1 block">Avatar URL (Optional)</label>
+                <input
+                  type="text"
+                  value={editContactAvatar}
+                  onChange={(e) => setEditContactAvatar(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#050505] border border-white/5 rounded-xl text-xs text-white focus:outline-none focus:border-[#2D5CFE] transition"
+                  placeholder="https://images.unsplash.com/... or leave empty"
+                />
+                <p className="text-[9px] text-slate-500 mt-1">Provide a picture web URL to override default initials.</p>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowEditContactModal(false)}
+                className="flex-1 py-2 bg-zinc-900 hover:bg-zinc-850 border border-white/5 text-slate-300 rounded-xl text-xs font-semibold transition uppercase"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onUpdateContact) {
+                    onUpdateContact(chat.id, {
+                      name: editContactName.trim() || chat.name,
+                      bio: editContactBio.trim() || chat.bio,
+                      avatar: editContactAvatar.trim()
+                    });
+                  }
+                  setShowEditContactModal(false);
+                }}
+                className="flex-1 py-2 nexus-gradient text-white rounded-xl text-xs font-bold hover:opacity-95 transition uppercase"
+              >
+                Save Details
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -834,10 +1140,9 @@ export function ChatPanel({
             ) : (
               <button
                 type="button"
-                onMouseDown={startVoiceRecording}
-                onTouchStart={startVoiceRecording}
+                onClick={startVoiceRecording}
                 className="p-2.5 rounded-xl bg-zinc-900 border border-white/5 text-slate-400 hover:text-[#2D5CFE] transition"
-                title="Hold to Record voice message logs"
+                title="Record voice message memo"
               >
                 <Mic className="w-4.5 h-4.5" />
               </button>
