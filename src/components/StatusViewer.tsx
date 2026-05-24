@@ -11,47 +11,46 @@ import {
   ChevronLeft, 
   Eye, 
   Send, 
-  Heart, 
-  ThumbsUp, 
-  Laugh, 
   VolumeX, 
   Volume2, 
-  SmilePlus, 
-  Archive 
+  Trash2
 } from "lucide-react";
 import { StatusUpdate } from "../types";
 
 interface StatusViewerProps {
-  status: StatusUpdate;
+  statuses: StatusUpdate[];
   onClose: () => void;
-  onNext?: () => void;
-  onPrev?: () => void;
   currentUserId: string;
   currentUserName: string;
   onStatusReply?: (statusUserId: string, replyText: string) => void;
   onMuteUser?: (statusUserId: string) => void;
+  onDeleteStatus?: (statusId: string) => void;
 }
 
 const statusEmojiReactions = ["🔥", "❤️", "👍", "😂", "😮", "😢", "🙌"];
 
 export function StatusViewer({ 
-  status, 
+  statuses, 
   onClose, 
-  onNext, 
-  onPrev, 
   currentUserId,
   currentUserName,
   onStatusReply, 
-  onMuteUser 
+  onMuteUser,
+  onDeleteStatus
 }: StatusViewerProps) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const status = statuses[currentIndex] || statuses[0];
+
   const [progress, setProgress] = useState(0);
   const [replyText, setReplyText] = useState("");
   const [showViewerList, setShowViewerList] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); // Default to try unmuted audio
   const [reactionsList, setReactionsList] = useState<string[]>([]);
 
   // Simulation of viewing user log
   useEffect(() => {
+    if (!status) return;
     // Add current user anonymously to status view array dynamically if not present
     const hasViewed = status.views.some(v => v.userId === currentUserId);
     if (!hasViewed) {
@@ -65,7 +64,7 @@ export function StatusViewer({
 
   // Story advancement timer (ticks up every 100ms for continuous progress bar)
   useEffect(() => {
-    if (isPaused) return;
+    if (isPaused || !status) return;
 
     const interval = setInterval(() => {
       setProgress(prev => {
@@ -77,27 +76,42 @@ export function StatusViewer({
     }, 100);
 
     return () => clearInterval(interval);
-  }, [isPaused, status.id]);
+  }, [isPaused, status?.id, currentIndex]);
+
+  const handleNext = () => {
+    if (currentIndex < statuses.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+      setProgress(0);
+    } else {
+      onClose();
+    }
+  };
+
+  const handlePrev = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(prev => prev - 1);
+      setProgress(0);
+    }
+  };
 
   // Handle action when progress reaches 100
   useEffect(() => {
     if (progress >= 100) {
-      if (onNext) {
-        onNext();
-      } else {
-        onClose();
-      }
+      handleNext();
     }
-  }, [progress, onNext, onClose]);
+  }, [progress]);
 
   // Reset progress bar value on story change
   useEffect(() => {
     setProgress(0);
-  }, [status.id]);
+  }, [currentIndex, status?.id]);
+
+  if (!status) {
+    return null;
+  }
 
   const handleSendReaction = (emoji: string) => {
     setReactionsList(prev => [...prev, emoji]);
-    // Save live viewer reaction onto the actual mock status structure
     const viewerEntry = status.views.find(v => v.userId === currentUserId);
     if (viewerEntry) {
       viewerEntry.reaction = emoji;
@@ -113,8 +127,7 @@ export function StatusViewer({
     }
     
     setReplyText("");
-    // Pulse notification toast
-    setProgress(100); // skip to close out
+    handleNext(); // Skip to next or close
   };
 
   return (
@@ -130,15 +143,26 @@ export function StatusViewer({
               </p>
             </div>
           ) : status.type === 'video' ? (
-            <div className="relative w-full h-full bg-slate-950 flex items-center justify-center">
+            <div className="relative w-full h-full bg-slate-1000 flex items-center justify-center">
               <video 
+                key={status.id}
                 src={status.mediaUrl} 
                 autoPlay 
-                muted 
+                muted={isMuted} 
                 loop 
                 playsInline
                 className="max-h-full max-w-full object-contain"
               />
+              
+              {/* Tap to Toggle Sound Button overlay */}
+              <button 
+                type="button"
+                onClick={() => setIsMuted(prev => !prev)}
+                className="absolute bottom-28 right-4 z-30 p-2.5 bg-black/60 hover:bg-black/85 backdrop-blur-md rounded-full transition flex items-center justify-center border border-white/10"
+                title={isMuted ? "Unmute device sound" : "Mute device sound"}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+              </button>
               
               {status.content && (
                 <div className="absolute bottom-24 inset-x-0 bg-black/65 backdrop-blur-md p-4 text-center text-sm border-t border-slate-900 leading-normal select-text select-none">
@@ -166,14 +190,26 @@ export function StatusViewer({
         {/* Top bar controls & story indicator progresses (analogous to Instagram / WhatsApp) */}
         <div className="relative z-10 w-full p-4 bg-gradient-to-b from-black/80 to-transparent flex flex-col gap-3">
           
-          {/* Progress Segment bar */}
-          <div className="w-full flex gap-1.5 px-1 py-1">
-            <div className="flex-1 bg-slate-800/80 h-1 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-gradient-to-r from-cyan-400 to-purple-500 transition-all duration-100 ease-linear shadow-[0_0_8px_rgba(6,182,212,0.8)]" 
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+          {/* Segmented Whatsapp style progress lines */}
+          <div className="w-full flex gap-1.5 px-0.5 py-1">
+            {statuses.map((item, idx) => {
+              let segmentProgress = 0;
+              if (idx < currentIndex) {
+                segmentProgress = 100;
+              } else if (idx === currentIndex) {
+                segmentProgress = progress;
+              } else {
+                segmentProgress = 0;
+              }
+              return (
+                <div key={item.id} className="flex-1 bg-white/20 h-1 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-[#2D5CFE] to-blue-400 transition-all duration-100 ease-linear shadow-[0_0_8px_rgba(45,92,254,0.8)]" 
+                    style={{ width: `${segmentProgress}%` }}
+                  />
+                </div>
+              );
+            })}
           </div>
 
           <div className="flex justify-between items-center">
@@ -188,9 +224,14 @@ export function StatusViewer({
               )}
               <div>
                 <p className="text-xs font-bold text-white">{status.userName}</p>
-                <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                  {new Date(status.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-zinc-400">
+                    {new Date(status.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="text-[9px] text-zinc-500 font-bold font-mono bg-zinc-950 px-1.5 py-0.5 rounded-md">
+                    {currentIndex + 1}/{statuses.length}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -198,27 +239,51 @@ export function StatusViewer({
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setIsPaused(!isPaused)}
-                className="p-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg text-slate-300 transition text-xs font-mono"
+                className="px-2.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 rounded-lg text-slate-300 transition text-[9px] font-bold tracking-wider font-sans border border-white/5 uppercase"
               >
                 {isPaused ? "RESUME" : "PAUSE"}
               </button>
 
-              {onMuteUser && (
+              {onMuteUser && status.userId !== currentUserId && (
                 <button
                   onClick={() => {
                     onMuteUser(status.userId);
                     onClose();
                   }}
-                  className="p-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg text-rose-400 hover:text-rose-300 transition"
+                  className="p-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg text-rose-400 hover:text-rose-300 transition border border-white/5"
                   title="Mute status updates from this account"
                 >
                   <VolumeX className="w-4 h-4" />
                 </button>
               )}
 
+              {status.userId === currentUserId && onDeleteStatus && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteStatus(status.id);
+                    if (statuses.length > 1) {
+                      // Adjust indexing
+                      if (currentIndex > 0) {
+                        setCurrentIndex(prev => prev - 1);
+                      } else {
+                        setCurrentIndex(0);
+                      }
+                      setProgress(0);
+                    } else {
+                      onClose();
+                    }
+                  }}
+                  className="p-2 bg-red-950/45 hover:bg-red-600 rounded-lg text-red-500 hover:text-white transition flex items-center justify-center border border-red-900/25"
+                  title="Delete this status info"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+
               <button
                 onClick={onClose}
-                className="p-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition"
+                className="p-2 bg-slate-900/60 hover:bg-slate-800 rounded-lg text-slate-300 hover:text-white transition border border-white/5"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -246,14 +311,14 @@ export function StatusViewer({
         </div>
 
         {/* Next/Prev Navigation Buttons */}
-        <div className="absolute inset-y-0 left-0 w-14 flex items-center justify-center bg-gradient-to-r from-black/20 to-transparent cursor-pointer" onClick={onPrev}>
-          <ChevronLeft className="w-6 h-6 text-slate-400 hover:text-white transition" />
+        <div className="absolute inset-y-0 left-0 w-16 flex items-center justify-start pl-2 bg-gradient-to-r from-black/30 to-transparent cursor-pointer group" onClick={handlePrev}>
+          <ChevronLeft className="w-7 h-7 text-slate-500 group-hover:text-white transition" />
         </div>
-        <div className="absolute inset-y-0 right-0 w-14 flex items-center justify-center bg-gradient-to-l from-black/20 to-transparent cursor-pointer" onClick={onNext}>
-          <ChevronRight className="w-6 h-6 text-slate-400 hover:text-white transition" />
+        <div className="absolute inset-y-0 right-0 w-16 flex items-center justify-end pr-2 bg-gradient-to-l from-black/30 to-transparent cursor-pointer group" onClick={handleNext}>
+          <ChevronRight className="w-7 h-7 text-slate-500 group-hover:text-white transition" />
         </div>
 
-        {/* Dynamic bottom panel: View count trigger OR status reply input bar */}
+        {/* Dynamic bottom panel */}
         <div className="relative z-10 w-full p-4 bg-gradient-to-t from-black/95 to-transparent flex flex-col items-center">
           
           {/* Reaction picker widget */}
@@ -270,7 +335,7 @@ export function StatusViewer({
             ))}
           </div>
 
-          {/* Current user's OWN status display -> can view list of viewers! */}
+          {/* Current user's OWN status display -> view list of viewers */}
           {status.userId === currentUserId ? (
             <div className="w-full max-w-sm flex flex-col items-center">
               <button
@@ -322,7 +387,7 @@ export function StatusViewer({
               />
               <button
                 type="submit"
-                className="p-2.5 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white transition flex items-center justify-center shadow-md"
+                className="p-2.5 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-650 hover:from-cyan-400 hover:to-indigo-550 text-white transition flex items-center justify-center shadow-md border border-white/5"
               >
                 <Send className="w-4 h-4" />
               </button>

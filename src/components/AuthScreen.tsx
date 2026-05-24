@@ -95,7 +95,43 @@ export function AuthScreen({ onAuthSuccess, langSet }: AuthScreenProps) {
         setAssignedProfile(data.profile);
       }
     } catch (err: any) {
-      setErrorMsg("Network error contacting full-stack authentication module.");
+      // Offline fallback register block for static Vercel deployments
+      const randomId = `+0${Math.floor(100000 + Math.random() * 900000)}`;
+      const offlineProfile = {
+        id: randomId,
+        name: name,
+        bio: bio || "Using Nexus Messenger (Offline mode).",
+        avatar: avatar,
+        registeredAt: new Date().toISOString(),
+        theme: 'dark',
+        accentColor: 'cyan',
+        bubbleColor: 'indigo',
+        wallpaper: 'default',
+        language: 'en',
+        lastSeenSetting: 'everyone',
+        onlineSetting: 'everyone',
+        dpSetting: 'everyone',
+        bioSetting: 'everyone',
+        statusPrivacy: 'everyone',
+        statusPrivacySelected: [],
+        readReceipts: true,
+        typingIndicator: true,
+        uploadQuality: 'standard',
+        autoDownload: { photos: 'wifi', videos: 'wifi', audio: 'wifi', documents: 'wifi' },
+        blockedUsers: [],
+        archivedChats: [],
+        lockedChats: [],
+        mutedChats: [],
+        pinnedChats: [],
+        starredMessages: []
+      };
+      
+      // Store credentials inside localized storage database
+      localStorage.setItem(`NEXUS_OFFLINE_USER_${randomId}`, JSON.stringify(offlineProfile));
+      localStorage.setItem(`NEXUS_OFFLINE_PW_${randomId}`, password);
+      
+      setGeneratedId(randomId);
+      setAssignedProfile(offlineProfile);
     } finally {
       setIsLoading(false);
     }
@@ -131,16 +167,29 @@ export function AuthScreen({ onAuthSuccess, langSet }: AuthScreenProps) {
         onAuthSuccess(data.profile);
       }
     } catch (err) {
-      setErrorMsg("Service link down. Syncing with localized credentials cache instead...");
-      // Mock validation bypass for offline simulation
-      if (nexusIdInput.startsWith("+0") && password.length >= 4) {
+      // Search localized offline storage for user record
+      const inputId = nexusIdInput.trim();
+      const offlinePw = localStorage.getItem(`NEXUS_OFFLINE_PW_${inputId}`);
+      const offlineProfileJSON = localStorage.getItem(`NEXUS_OFFLINE_USER_${inputId}`);
+      
+      if (offlineProfileJSON && offlinePw === password) {
+        if (rememberMe) {
+          localStorage.setItem("NEXUS_SAVED_ID", inputId);
+          localStorage.setItem("NEXUS_SAVED_PW", password);
+        }
+        onAuthSuccess(JSON.parse(offlineProfileJSON));
+      } else if (inputId.startsWith("+0") && password.length >= 4) {
         const mockProfile = {
-          id: nexusIdInput,
-          name: "Virtual User " + nexusIdInput.substring(4),
+          id: inputId,
+          name: "Virtual User " + inputId.substring(4),
           bio: "Hey there! Custom offline restored node active.",
           avatar: "",
           registeredAt: new Date().toISOString()
         };
+        if (rememberMe) {
+          localStorage.setItem("NEXUS_SAVED_ID", inputId);
+          localStorage.setItem("NEXUS_SAVED_PW", password);
+        }
         onAuthSuccess(mockProfile);
       } else {
         setErrorMsg("Failed to backup log login offline. Enter ID starting with +0 (e.g. +076429); password >= 4.");

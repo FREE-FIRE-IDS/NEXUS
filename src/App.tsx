@@ -83,11 +83,15 @@ export default function App() {
   const [activeCall, setActiveCall] = useState<any | null>(null);
   
   // Status story active uploader
-  const [activeStatusViewer, setActiveStatusViewer] = useState<StatusUpdate | null>(null);
-  const [newStatusType, setNewStatusType] = useState<'text' | 'image' | 'video'>('text');
-  const [newStatusText, setNewStatusText] = useState('');
-  const [newStatusFile, setNewStatusFile] = useState<string>('');
-  const [newStatusFileName, setNewStatusFileName] = useState('');
+  const [activeStatusSequence, setActiveStatusSequence] = useState<StatusUpdate[] | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<{
+    type: 'text' | 'image' | 'video';
+    content: string; // text string or caption
+    mediaUrl?: string; // base64 representation
+    textBg?: string; // gradient layout class
+    videoDuration?: number; // raw total duration
+    selectedLengthLimit?: number; // custom cropped duration in seconds
+  } | null>(null);
 
   // Native notification banners
   const [systemToasts, setSystemToasts] = useState<Array<{ id: string; title: string; desc: string; icon?: string }>>([]);
@@ -275,17 +279,13 @@ export default function App() {
       setChats(JSON.parse(cachedChats));
       setMessages(JSON.parse(cachedMsgs));
     } else {
-      // Preload 4 gorgeous automated chat channels
+      // Preload 1 official voice assistant companion chat
       const initialChats: Chat[] = [
-        { id: "chat-+0101010", participantId: "+0101010", name: "Assistant Nexus Agent", avatar: "", bio: "Official AI companion. Ask me anything!", online: true, unreadCount: 1, lastSeen: "Online" },
-        { id: "chat-+0246810", participantId: "+0246810", name: "Sophia Lin", avatar: "", bio: "Product Designer | Color aesthetics ✨", online: true, unreadCount: 1, lastSeen: "Active 5m ago" },
-        { id: "chat-+0135790", participantId: "+0135790", name: "Vikram Patel", avatar: "", bio: "Tech Lead | Cloud compiler 💻", online: false, unreadCount: 0, lastSeen: "Last seen at 09:22" },
-        { id: "chat-+0481516", participantId: "+0481516", name: "Emma Watson", avatar: "", bio: "Literature readings and film ☕", online: true, unreadCount: 0, lastSeen: "Online" }
+        { id: "chat-+0101010", participantId: "+0101010", name: "Assistant Nexus Agent", avatar: "", bio: "Official AI companion. Ask me anything!", online: true, unreadCount: 1, lastSeen: "Online" }
       ];
 
       const initialMsgs: Message[] = [
-        { id: "m-1", chatId: "chat-+0101010", senderId: "+0101010", senderName: "Assistant Nexus Agent", type: 'text', content: "Welcome to Nexus Messenger! Powered by Google Gemini. Type any inquiry or dial me directly via voice/video!", seen: false, delivered: true, timestamp: new Date(Date.now() - 3600000).toISOString() },
-        { id: "m-2", chatId: "chat-+0246810", senderId: "+0246810", senderName: "Sophia Lin", type: 'text', content: "Hey! Let's build a stunning minimalist UI together. Check my visual designs in the Status tab in bottom menu! 🕒✨", seen: false, delivered: true, timestamp: new Date(Date.now() - 1800000).toISOString() }
+        { id: "m-1", chatId: "chat-+0101010", senderId: "+0101010", senderName: "Assistant Nexus Agent", type: 'text', content: "Welcome to Nexus Messenger! Powered by Google Gemini. Type any inquiry or dial me directly via voice/video!", seen: false, delivered: true, timestamp: new Date(Date.now() - 3600000).toISOString() }
       ];
 
       setChats(initialChats);
@@ -299,31 +299,7 @@ export default function App() {
     if (cachedStatuses) {
       setStatuses(JSON.parse(cachedStatuses));
     } else {
-      const demoStatuses: StatusUpdate[] = [
-        {
-          id: "stat-1",
-          userId: "+0246810",
-          userName: "Sophia Lin",
-          userAvatar: "",
-          type: 'text',
-          content: "Designing the new Cosmic Slate pitch accent. Less is more! ✨👾",
-          textBg: "bg-gradient-to-tr from-cyan-600 via-indigo-600 to-purple-800",
-          timestamp: new Date().toISOString(),
-          views: []
-        },
-        {
-          id: "stat-2",
-          userId: "+0135790",
-          userName: "Vikram Patel",
-          userAvatar: "",
-          type: 'image',
-          content: "Debugging the virtual packet routing database metrics. 🖥️⚡",
-          mediaUrl: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop",
-          timestamp: new Date(Date.now() - 1200000).toISOString(),
-          views: []
-        }
-      ];
-      setStatuses(demoStatuses);
+      setStatuses([]);
     }
   };
 
@@ -682,6 +658,14 @@ export default function App() {
     setStatuses(updated);
     saveCacheInstantly(currentUser.id, chats, messages, calls, updated);
     triggerToast("STATUS PUBLISHED", `Your ${type} status story is live on Nexus networks!`, "🕒");
+  };
+
+  const handleDeleteStatus = (statusId: string) => {
+    if (!currentUser) return;
+    const updated = statuses.filter(s => s.id !== statusId);
+    setStatuses(updated);
+    saveCacheInstantly(currentUser.id, chats, messages, calls, updated);
+    triggerToast("STATUS DELETED", "Your status story was permanently deleted.", "🗑️");
   };
 
   const handleStatusMuteToggle = (targetUserId: string) => {
@@ -1080,159 +1064,184 @@ export default function App() {
             {activeTab === 'status' && (
               <div className="space-y-4 text-left p-2">
                 
-                {/* User's OWN status creation panel */}
-                <div className="p-4 bg-zinc-900 border border-white/5 rounded-2xl space-y-3.5">
-                  <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Publish status story</h4>
-                    <div className="flex gap-1 bg-zinc-950 p-0.5 rounded-lg border border-white/5">
-                      <button 
-                        type="button" 
-                        onClick={() => { setNewStatusType('text'); setNewStatusFile(''); setNewStatusFileName(''); }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${newStatusType === 'text' ? 'bg-[#2D5CFE] text-white' : 'text-slate-400 hover:text-white'}`}
-                      >
-                        Text
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => { setNewStatusType('image'); setNewStatusFile(''); setNewStatusFileName(''); }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${newStatusType === 'image' ? 'bg-[#2D5CFE] text-white' : 'text-slate-400 hover:text-white'}`}
-                      >
-                        Photo
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => { setNewStatusType('video'); setNewStatusFile(''); setNewStatusFileName(''); }}
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold transition ${newStatusType === 'video' ? 'bg-[#2D5CFE] text-white' : 'text-slate-400 hover:text-white'}`}
-                      >
-                        Video
-                      </button>
-                    </div>
+                {/* User's OWN status creation buttons panel */}
+                <div className="p-4 bg-zinc-900 border border-white/5 rounded-2xl space-y-4">
+                  <div className="pb-2 border-b border-white/5 border-dashed">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Share Your Thoughts</h4>
+                    <p className="text-[10px] text-zinc-500 mt-1">Select media channels to preview and broadcast to Nexus</p>
                   </div>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingStatus({
+                          type: 'text',
+                          content: '',
+                          textBg: "bg-gradient-to-tr from-cyan-600 to-indigo-700"
+                        });
+                      }}
+                      className="p-3 bg-zinc-950 border border-white/5 hover:border-[#2D5CFE] rounded-xl flex flex-col items-center justify-center gap-1.5 transition text-center"
+                    >
+                      <span className="text-xl">📝</span>
+                      <span className="text-[9px] font-extrabold uppercase text-slate-300">Text Status</span>
+                    </button>
 
-                  {newStatusType === 'text' ? (
-                    <div className="space-y-2">
-                      <div className="flex gap-2.5">
-                        <input
-                          type="text"
-                          placeholder="Write brief status..."
-                          value={newStatusText}
-                          onChange={(e) => setNewStatusText(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && newStatusText.trim()) {
-                              handlePublishTextStatus(newStatusText);
-                              setNewStatusText("");
-                            }
-                          }}
-                          className="flex-1 bg-[#050505] border border-white/5 px-3 py-1.5 rounded-xl text-xs text-white focus:outline-none focus:border-[#2D5CFE]"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (newStatusText.trim()) {
-                              handlePublishTextStatus(newStatusText);
-                              setNewStatusText("");
-                            }
-                          }}
-                          className="px-3 bg-[#2D5CFE] hover:bg-blue-600 text-white text-xs font-bold rounded-xl transition"
-                        >
-                          Send
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-3">
-                        <input 
-                          type="file" 
-                          accept={newStatusType === 'image' ? "image/*" : "video/*"}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              setNewStatusFileName(file.name);
-                              const reader = new FileReader();
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fileInput = document.getElementById('status-image-trigger');
+                        if (fileInput) fileInput.click();
+                      }}
+                      className="p-3 bg-zinc-950 border border-white/5 hover:border-[#2D5CFE] rounded-xl flex flex-col items-center justify-center gap-1.5 transition text-center"
+                    >
+                      <span className="text-xl">📷</span>
+                      <span className="text-[9px] font-extrabold uppercase text-slate-300">Photo Status</span>
+                      <input 
+                        type="file" 
+                        id="status-image-trigger" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setPendingStatus({
+                                type: 'image',
+                                content: '',
+                                mediaUrl: reader.result as string
+                              });
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fileInput = document.getElementById('status-video-trigger');
+                        if (fileInput) fileInput.click();
+                      }}
+                      className="p-3 bg-zinc-950 border border-white/5 hover:border-[#2D5CFE] rounded-xl flex flex-col items-center justify-center gap-1.5 transition text-center"
+                    >
+                      <span className="text-xl">🎥</span>
+                      <span className="text-[9px] font-extrabold uppercase text-slate-300">Video Status</span>
+                      <input 
+                        type="file" 
+                        id="status-video-trigger" 
+                        accept="video/*" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            const videoElement = document.createElement('video');
+                            videoElement.preload = 'metadata';
+                            const objectUrl = URL.createObjectURL(file);
+                            videoElement.src = objectUrl;
+                            videoElement.onloadedmetadata = () => {
+                              URL.revokeObjectURL(objectUrl);
+                              const duration = videoElement.duration;
                               reader.onloadend = () => {
-                                setNewStatusFile(reader.result as string);
+                                setPendingStatus({
+                                  type: 'video',
+                                  content: '',
+                                  mediaUrl: reader.result as string,
+                                  videoDuration: duration,
+                                  selectedLengthLimit: 30
+                                });
                               };
                               reader.readAsDataURL(file);
-                            }
-                          }}
-                          className="hidden" 
-                          id="status-media-upload"
-                        />
-                        <label 
-                          htmlFor="status-media-upload"
-                          className="py-1.5 px-3 bg-[#2D5CFE] hover:bg-blue-600 transition text-white rounded-lg text-[10px] font-bold cursor-pointer inline-flex items-center shadow-lg shadow-blue-950/20"
-                        >
-                          Choose {newStatusType === 'image' ? 'Photo' : 'Video'} File
-                        </label>
-                        <span className="text-[10px] text-zinc-400 truncate max-w-[140px]">
-                          {newStatusFileName || "No file selected"}
-                        </span>
-                      </div>
-
-                      {newStatusFile && (
-                        <div className="space-y-2">
-                          <input 
-                            type="text" 
-                            placeholder="Add caption..." 
-                            value={newStatusText}
-                            onChange={(e) => setNewStatusText(e.target.value)}
-                            className="w-full bg-[#050505] border border-white/5 px-3 py-1.5 rounded-xl text-xs text-white focus:outline-none focus:border-[#2D5CFE]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              handlePublishFileStatus(newStatusType as 'image' | 'video', newStatusFile, newStatusText);
-                              setNewStatusFile('');
-                              setNewStatusFileName('');
-                              setNewStatusText('');
-                            }}
-                            className="w-full py-1.5 bg-[#2D5CFE] hover:bg-blue-600 text-white rounded-lg text-xs font-bold transition"
-                          >
-                            Share Status Story
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                            };
+                          }
+                        }}
+                      />
+                    </button>
+                  </div>
                 </div>
 
+                {/* Status updates feed list grouped by user */}
                 <div className="space-y-2">
                   <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Recent updates feeds</h4>
                   
-                  {statuses
-                    .filter(st => st.userId === currentUser?.id || chats.some(c => c.participantId === st.userId))
-                    .map((st) => (
-                      <div 
-                        key={st.id}
-                        onClick={() => setActiveStatusViewer(st)}
-                        className="p-2.5 bg-zinc-900 border border-white/5 hover:bg-zinc-800 rounded-2xl flex items-center justify-between cursor-pointer transition select-none"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="relative">
-                            {st.userAvatar ? (
-                              <img src={st.userAvatar} className="w-10 h-10 rounded-full object-cover border-2 border-[#2D5CFE]" />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-[#2D5CFE] font-bold text-xs border border-white/5">
-                                {st.userName.slice(0, 2).toUpperCase()}
-                              </div>
-                            )}
-                            <span className="absolute inset-0 rounded-full border border-[#2D5CFE] border-dashed animate-spin delay-200" />
-                          </div>
+                  {(() => {
+                    // Group status updates dynamically by userId
+                    const groups: { [userId: string]: StatusUpdate[] } = {};
+                    
+                    // Filter: My statuses + statuses from people with active chats
+                    const filtered = statuses.filter(st => {
+                      return st.userId === currentUser?.id || chats.some(c => c.participantId === st.userId);
+                    });
 
-                          <div>
-                            <p className="text-xs font-bold text-white">{st.userName}</p>
-                            <p className="text-[9px] text-slate-500 font-mono mt-0.5">
-                              {new Date(st.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </p>
-                          </div>
+                    filtered.forEach(st => {
+                      if (!groups[st.userId]) {
+                        groups[st.userId] = [];
+                      }
+                      groups[st.userId].push(st);
+                    });
+
+                    // Sort individual status updates within each group by timestamp ascending (chronological story order)
+                    Object.keys(groups).forEach(uid => {
+                      groups[uid].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+                    });
+
+                    const groupKeys = Object.keys(groups);
+
+                    if (groupKeys.length === 0) {
+                      return (
+                        <div className="p-8 text-center bg-zinc-900 border border-white/5 rounded-2xl text-xs text-zinc-500 font-sans">
+                          No live stories published yet. Select a channel to preview & share your status update with Nexus!
                         </div>
+                      );
+                    }
 
-                        <span className="text-[9px] bg-zinc-800 border border-white/5 text-[#2D5CFE] px-2.5 py-0.5 rounded-full uppercase font-bold text-center">
-                          Open
-                        </span>
-                      </div>
-                    ))}
+                    return groupKeys.map((uid) => {
+                      const userGroup = groups[uid];
+                      const firstStory = userGroup[0];
+                      const latestStory = userGroup[userGroup.length - 1];
+                      
+                      return (
+                        <div 
+                          key={uid}
+                          onClick={() => {
+                            // Launch sequential viewer with this entire group!
+                            setActiveStatusSequence(userGroup);
+                          }}
+                          className="p-2.5 bg-zinc-900 border border-white/5 hover:bg-zinc-800 rounded-2xl flex items-center justify-between cursor-pointer transition select-none animate-fade-in"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="relative">
+                              {firstStory.userAvatar ? (
+                                <img src={firstStory.userAvatar} className="w-10 h-10 rounded-full object-cover border border-[#2D5CFE]/30" />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-zinc-805 flex items-center justify-center text-[#2D5CFE] font-bold text-xs border border-white/5">
+                                  {firstStory.userName.slice(0, 2).toUpperCase()}
+                                </div>
+                              )}
+                              {/* Glowing story ring indicator matching WhatsApp dashes */}
+                              <span className="absolute inset-0 rounded-full border border-dashed border-sky-400 animate-pulse" />
+                            </div>
+
+                            <div>
+                              <p className="text-xs font-bold text-white">
+                                {uid === currentUser?.id ? "My Status Story" : firstStory.userName}
+                              </p>
+                              <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                {userGroup.length} item{userGroup.length !== 1 ? "s" : ""} • latest {new Date(latestStory.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className="text-[10px] bg-zinc-800 border border-white/5 text-[#2D5CFE] px-3.5 py-1.5 rounded-full uppercase font-bold text-center">
+                            Open
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             )}
@@ -1454,10 +1463,10 @@ export default function App() {
       )}
 
       {/* 2. Status Story viewer element */}
-      {activeStatusViewer && (
+      {activeStatusSequence && activeStatusSequence.length > 0 && (
         <StatusViewer 
-          status={activeStatusViewer}
-          onClose={() => setActiveStatusViewer(null)}
+          statuses={activeStatusSequence}
+          onClose={() => setActiveStatusSequence(null)}
           currentUserId={currentUser.id}
           currentUserName={currentUser.name}
           onStatusReply={(uid, msg) => {
@@ -1480,7 +1489,186 @@ export default function App() {
             }
           }}
           onMuteUser={handleStatusMuteToggle}
+          onDeleteStatus={handleDeleteStatus}
         />
+      )}
+
+      {/* 2b. Premium WhatsApp-like Status Publish Preview Popup Modal */}
+      {pendingStatus && (
+        <div className="fixed inset-0 z-50 bg-[#050505]/95 backdrop-blur-md flex flex-col justify-between p-4 font-sans text-white select-none items-center">
+          
+          {/* Top Header Controls */}
+          <div className="w-full max-w-md flex justify-between items-center py-2.5 border-b border-white/5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Status story preview</h3>
+            <button 
+              type="button"
+              onClick={() => setPendingStatus(null)}
+              className="px-3.5 py-1 bg-zinc-900 border border-white/5 rounded-full hover:bg-zinc-800 text-[10px] font-black tracking-widest text-rose-400 uppercase transition"
+            >
+              Cancel
+            </button>
+          </div>
+
+          {/* Aesthetic 9:16 vertical preview mock page */}
+          <div className="w-full max-w-[250px] aspect-[9/16] rounded-2xl border border-white/10 shadow-2xl relative overflow-hidden bg-zinc-950 flex flex-col justify-end">
+            {pendingStatus.type === 'text' ? (
+              <div className={`absolute inset-0 ${pendingStatus.textBg || "bg-gradient-to-tr from-cyan-600 to-indigo-700"} flex flex-col justify-center items-center p-6 text-center shadow-inner`}>
+                <p className="text-sm font-bold leading-relaxed text-white break-words max-h-full overflow-hidden select-text text-shadow-md">
+                  {pendingStatus.content || "Type status message..."}
+                </p>
+              </div>
+            ) : (
+              <>
+                {pendingStatus.type === 'image' ? (
+                  <img src={pendingStatus.mediaUrl} className="absolute inset-0 w-full h-full object-cover" />
+                ) : (
+                  <video 
+                    key={pendingStatus.mediaUrl}
+                    src={pendingStatus.mediaUrl} 
+                    autoPlay 
+                    muted 
+                    loop 
+                    playsInline 
+                    className="absolute inset-0 w-full h-full object-cover animate-fade-in" 
+                  />
+                )}
+                
+                {pendingStatus.content && (
+                  <div className="relative z-10 w-full bg-black/75 backdrop-blur-sm p-3 text-center text-[10px] font-sans text-white leading-normal select-text break-words">
+                    {pendingStatus.content}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Controls Editor Options bottom panel wrapper */}
+          <div className="w-full max-w-md bg-zinc-900 border border-white/5 rounded-2xl p-4 space-y-4">
+            
+            {/* Context adjustments (Theme togglers, video durations) */}
+            {pendingStatus.type === 'text' && (
+              <div className="flex justify-between items-center">
+                <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Aesthetic Canvas Theme</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const themes = [
+                      "bg-gradient-to-tr from-[#12c2e9] via-[#c471ed] to-[#f64f59]",
+                      "bg-gradient-to-tr from-cyan-600 to-indigo-700",
+                      "bg-gradient-to-tr from-pink-600 to-rose-700",
+                      "bg-gradient-to-tr from-emerald-600 to-teal-800",
+                      "bg-gradient-to-tr from-amber-600 to-red-700",
+                      "bg-gradient-to-tr from-purple-800 via-violet-900 to-slate-950"
+                    ];
+                    const currentBg = pendingStatus.textBg || themes[0];
+                    const currentIndex = themes.indexOf(currentBg);
+                    const nextIndex = (currentIndex + 1) % themes.length;
+                    setPendingStatus({ ...pendingStatus, textBg: themes[nextIndex] });
+                  }}
+                  className="px-3.5 py-1.5 bg-[#2D5CFE] hover:bg-blue-600 rounded-lg text-[9px] font-black uppercase tracking-wider text-white transition flex items-center gap-1"
+                >
+                  <span>Cycle Style 🎨</span>
+                </button>
+              </div>
+            )}
+
+            {pendingStatus.type === 'video' && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-[9px] uppercase tracking-wider font-bold text-slate-400">
+                  <span>Dynamic Crop Duration Selection</span>
+                  <span className="text-cyan-400 font-mono font-black">
+                    {pendingStatus.selectedLengthLimit || 30} Seconds Length
+                  </span>
+                </div>
+                
+                <div className="space-y-1">
+                  <input 
+                    type="range"
+                    min={5}
+                    max={30}
+                    value={pendingStatus.selectedLengthLimit || 30}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setPendingStatus({ ...pendingStatus, selectedLengthLimit: val });
+                    }}
+                    className="w-full accent-[#2D5CFE] cursor-pointer"
+                  />
+                  <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                    <span>5 Seconds Limit</span>
+                    <span>Whatsapp Default Limit (30 Seconds)</span>
+                  </div>
+                </div>
+
+                {pendingStatus.videoDuration && pendingStatus.videoDuration > (pendingStatus.selectedLengthLimit || 30) && (
+                  <div className="p-2 py-1.5 bg-amber-950/25 border border-amber-900/45 rounded-lg text-[9px] text-amber-400 leading-normal font-sans">
+                    ⚠ Selected source video is {Math.round(pendingStatus.videoDuration)}s. It will be seamlessly cropped to broadcast only the starting {pendingStatus.selectedLengthLimit || 30} seconds.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Live Input label caption box */}
+            <div className="space-y-1 text-left">
+              <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest block pl-0.5">
+                {pendingStatus.type === 'text' ? 'Status Body Text' : 'Status Story Caption'}
+              </label>
+              <input 
+                type="text"
+                placeholder={pendingStatus.type === 'text' ? 'What’s on your mind?...' : 'Add custom caption text...'}
+                value={pendingStatus.content}
+                onChange={(e) => setPendingStatus({ ...pendingStatus, content: e.target.value })}
+                className="w-full bg-black/60 border border-white/5 px-3 py-2 rounded-xl text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-[#2D5CFE] transition"
+              />
+            </div>
+
+            {/* Broadcast action trigger button */}
+            <button
+              type="button"
+              disabled={pendingStatus.type === 'text' && !pendingStatus.content.trim()}
+              onClick={() => {
+                if (pendingStatus.type === 'text') {
+                  if (!pendingStatus.content.trim()) return;
+                  const newStatus: StatusUpdate = {
+                    id: `stat-${Date.now()}`,
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    userAvatar: currentUser.avatar,
+                    type: 'text',
+                    content: pendingStatus.content,
+                    textBg: pendingStatus.textBg || "bg-gradient-to-tr from-cyan-600 to-indigo-700",
+                    timestamp: new Date().toISOString(),
+                    views: []
+                  };
+                  const updated = [newStatus, ...statuses];
+                  setStatuses(updated);
+                  saveCacheInstantly(currentUser.id, chats, messages, calls, updated);
+                  triggerToast("STATUS PUBLISHED", "Your thoughts status story is live on Nexus networks!", "🕒");
+                } else {
+                  const newStatus: StatusUpdate = {
+                    id: `stat-${Date.now()}`,
+                    userId: currentUser.id,
+                    userName: currentUser.name,
+                    userAvatar: currentUser.avatar,
+                    type: pendingStatus.type,
+                    content: pendingStatus.content,
+                    mediaUrl: pendingStatus.mediaUrl,
+                    timestamp: new Date().toISOString(),
+                    views: []
+                  };
+                  const updated = [newStatus, ...statuses];
+                  setStatuses(updated);
+                  saveCacheInstantly(currentUser.id, chats, messages, calls, updated);
+                  triggerToast("STATUS PUBLISHED", `Your ${pendingStatus.type} status story is live on Nexus networks!`, "🕒");
+                }
+                setPendingStatus(null);
+              }}
+              className="w-full py-2.5 bg-[#2D5CFE] hover:bg-blue-600 disabled:opacity-40 disabled:hover:bg-[#2D5CFE] text-white rounded-xl text-xs font-black uppercase tracking-wider transition text-center shadow-lg"
+            >
+              Share Status Story 🚀
+            </button>
+
+          </div>
+        </div>
       )}
 
       {/* 3. PIN Lock Verification Overlay (secure vault checks) */}
