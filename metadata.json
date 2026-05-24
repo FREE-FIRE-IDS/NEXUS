@@ -1,0 +1,9 @@
+{
+  "name": "Nexus Messenger",
+  "description": "Production-level messaging platform utilizing virtual Nexus IDs, advanced security recovery, voice/video calls simulations, status sharing, custom privacy settings, and real-time AI conversation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

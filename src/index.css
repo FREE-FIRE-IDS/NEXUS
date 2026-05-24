@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;650&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #2D5CFE;
+  --color-brand-secondary: #1A3BB0;
+  --color-bg-deep: #050505;
+  --color-bg-chat: #0A0A0B;
+  --color-bg-obsidian: #0F0F11;
+  --color-bg-sidebar: rgba(20, 20, 22, 0.95);
+  --color-item-hover: rgba(255, 255, 255, 0.04);
+  --color-active-blue: rgba(45, 92, 254, 0.12);
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #050505 !important;
+  color: #E0E0E0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Customized Design Classes mapped from Sleek Interface template */
+.nexus-gradient {
+  background: linear-gradient(135deg, #2D5CFE 0%, #1A3BB0 100%);
+}
+
+.bg-nexus-gradient {
+  background: linear-gradient(135deg, #2D5CFE 0%, #1A3BB0 100%);
+}
+
+.glass-sidebar {
+  background: rgba(20, 20, 22, 0.95);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.active-chat {
+  background: rgba(45, 92, 254, 0.12);
+  border-left: 3px solid #2D5CFE !important;
+}
+
+.chat-bubble-me {
+  background: #2D5CFE !important;
+  border-radius: 18px 18px 4px 18px;
+}
+
+.chat-bubble-them {
+  background: #262629 !important;
+  border-radius: 18px 18px 18px 4px;
+}
+
+.dot-online {
+  width: 10px;
+  height: 10px;
+  background: #00D166;
+  border: 2px solid #141416;
+  border-radius: 50%;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.status-ring {
+  padding: 2px;
+  border: 2px solid #2D5CFE;
+  border-radius: 50%;
+}
